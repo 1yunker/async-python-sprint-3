@@ -2,3 +2,7 @@
 .idea/
 __pycache__/
 *.pyc
+/venv
+
+# temp files
+messages.json

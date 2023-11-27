@@ -3,7 +3,7 @@ import json
 import logging
 import sys
 from asyncio.streams import StreamReader, StreamWriter
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -18,6 +18,8 @@ PUBLIC_CHAT_NAME = 'Public'
 LAST_MESSAGES_CNT = 20
 # Лимит отправляемых одним пользоватеелм сообщений в час (в общий чат)
 LIMIT_MESSAGES_CNT = 20
+# Время жизни сообщения в секундах
+TTL_MESSAGES_SEC = timedelta(seconds=3600)
 
 
 class Message:
@@ -59,25 +61,25 @@ class Chat:
 
 class Server:
     # Имя файла для сохранения истории общего чата
-    BACKUP_FILE = 'Chat_messages.json'
+    BACKUP_FILE = 'messages.json'
 
     def __init__(self, host=HOST, port=PORT):
         self.clients = {}
         self.server = None
         self.host = host
         self.port = port
-        self.messages_store = []
+        self.message_store = []
         self.public_chat = Chat(PUBLIC_CHAT_NAME, clients=set(), messages=[])
         self.chats = {'Public': self.public_chat}
 
-        # self.restore_chat_history()
+        self.restore_chat_history(self.BACKUP_FILE)
 
     def backup_chat_history(self, backup_file: str) -> None:
         """
         Сохраняет историю общего чата в JSON-файл (BACKUP_FILE)
         """
         messages_json = []
-        for message in self.messages_store:
+        for message in self.message_store:
             message_dict = dict(message.__dict__)
             message_dict['datetime'] = str(message.datetime)
             messages_json.append(message_dict)
@@ -92,36 +94,45 @@ class Server:
         """
         Восстанавливает историю общего чата из JSON-файла (BACKUP_FILE)
         """
-        with open(backup_file, 'r') as f:
-            messages = json.load(f)
+        try:
+            with open(backup_file, 'r') as f:
+                messages = json.load(f)
 
-        for message in messages:
-            message_obj = Message(
-                username=message.get('author'),
-                text=message.get('text'),
-                created_at=datetime.strptime(
-                    message.get('start_at'), '%Y-%m-%d %H:%M:%S.%f'
-                ),
+            for message in messages:
+                message_obj = Message(
+                    username=message.get('author'),
+                    text=message.get('text'),
+                    created_at=datetime.strptime(
+                        message.get('datetime'), '%Y-%m-%d %H:%M:%S.%f'
+                    ),
+                )
+
+                if message_obj.datetime - datetime.now() < TTL_MESSAGES_SEC:
+                    self.message_store.append(message_obj)
+            logger.info(
+                f'История общего чата успешно восстановлена из {backup_file}.'
             )
-            self.messages_store.append(message_obj)
-        logger.info(
-            f'История общего чата успешно восстановлена из {backup_file}.'
-        )
+        except Exception as err:
+            logger.error(
+                f'При чтении файла {backup_file} произошла ошибка: {err}.'
+            )
 
     async def send_last_messages(self, writer: StreamWriter) -> None:
         """
         Посылает клиенту последние LAST_MESSAGES_CNT сообщений
         """
-        for message_obj in self.messages_store[-LAST_MESSAGES_CNT:]:
-            message = str(message_obj)
-            writer.write(f'{message}\n'.encode())
+        for message_obj in self.message_store[-LAST_MESSAGES_CNT:]:
+            message_bytes = message_obj_to_message_str(message_obj).encode()
+            writer.write(message_bytes)
             await writer.drain()
+        # await asyncio.sleep(0.1)
 
-    async def send_all_exept_me(
+    async def send_all_exсept_me(
             self, message: str, write_username: str) -> None:
         """
         Отправляет сообщения всем клиентам в чате кроме себя
         """
+        await asyncio.sleep(0.1)
         # for user, client_writer in self.clients.items():
         #     for chat_name, chat in self.chats.items():
         #         if (user in chat.clients and write_username in chat.clients
@@ -133,19 +144,18 @@ class Server:
             self, reader: StreamReader, writer: StreamWriter):
 
         # Принятый байткод переводим в строку и десереализуем в объект Message
-        message_bytes: bytes = await reader.readline()
-        message_str = message_bytes.decode().strip()
+        intro_bytes: bytes = await reader.readline()
+        message_str = intro_bytes.decode().strip()
         message_obj = message_str_to_message_obj(message_str)
 
-        if message_obj.author in self.clients.keys():
+        if message_obj.author not in self.clients.keys():
             self.clients[message_obj.author] = writer
             await self.send_last_messages(writer)
         else:
             self.public_chat.clients.add(message_obj.author)
-            new_client_message = f'{message_obj.author} вошел в чат'
+            new_client_message = f'{message_obj.author} добавился в чат'
             print(new_client_message)
-            self.messages_store.append(message_obj)
-            await self.send_all_exept_me(
+            await self.send_all_exсept_me(
                 new_client_message, message_obj.author)
 
         try:
@@ -156,8 +166,12 @@ class Server:
 
                 message_str = message_bytes.decode().strip()
                 message_obj = message_str_to_message_obj(message_str)
+
                 if message_obj.text.startswith('/quit'):
                     break
+
+                if message_obj.text.startswith('/stop'):
+                    await self.stop()
 
                 # if message_bytes.decode().startswith('/chats'):
                 #     """Метод получения списка чатов"""
@@ -174,10 +188,10 @@ class Server:
                 #     await self.send_to_one_client(message_bytes, username)
                 #     continue
 
-                self.messages_store.append(message_obj)
+                self.message_store.append(message_obj)
                 print(message_obj)
 
-                await self.send_all_exept_me(
+                await self.send_all_exсept_me(
                     message_str, message_obj.author)
 
         except asyncio.IncompleteReadError as error:
@@ -196,18 +210,19 @@ class Server:
         async with self.server:
             await self.server.serve_forever()
 
-    # async def stop(self):
-    #     self.server.close()
-    #     await self.server.wait_closed()
-    #     # write the chat history to a file
-    #     with open(self.BACKUP_FILE, 'w') as f:
-    #         # pickle.dump(self.chats, f)
-    #     logger.info('Server stopped')
+    async def stop(self):
+        self.server.close()
+        await self.server.wait_closed()
+        self.backup_chat_history(self.BACKUP_FILE)
+        logger.info('Сервер остановлен.')
 
 
 async def main() -> None:
-    server = Server()
-    await server.listen()
+    try:
+        server = Server()
+        await server.listen()
+    except asyncio.CancelledError:
+        print('Сервер остановлен по требованию клиента.')
 
 
 if __name__ == '__main__':

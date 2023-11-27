@@ -1,6 +1,6 @@
 import asyncio
 import logging
-
+from aioconsole import ainput
 from server import (
     HOST,
     PORT,
@@ -24,7 +24,7 @@ class Client:
 
     async def start(self) -> None:
         """
-        Подключаемся к серверу и посылаем сообщение о присоединении в общий чат
+        Подключаемся к серверу и посылаем стартовое сообщение
         """
         logger.info(f'Запускаем клиента под именем {self.username}')
         try:
@@ -33,11 +33,11 @@ class Client:
             )
             print(f'Подключились к {self.server_host}:{self.server_port}')
 
-            # Отсылаем стартовое сообщение с именем пользователя
+            # Отправляем стартовое сообщение с именем пользователя
             message_obj = Message(username=self.username)
             message_bytes = message_obj_to_message_str(message_obj).encode()
             self.writer.write(message_bytes)
-            # self.writer.drain()
+            await self.writer.drain()
             await asyncio.gather(self.listen(), self.send())
 
         except Exception as error:
@@ -58,12 +58,12 @@ class Client:
 
     async def send(self) -> None:
         while True:
-            user_input = str(input())
+            user_input = await ainput('')
             if not user_input:  # i.e. enter key pressed
                 break
 
-            message = Message(username=self.username, text=user_input)
-            message_bytes = message_obj_to_message_str(message).encode()
+            message_obj = Message(username=self.username, text=user_input)
+            message_bytes = message_obj_to_message_str(message_obj).encode()
             self.writer.write(message_bytes)
             await self.writer.drain()
 
