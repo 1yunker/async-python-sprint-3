@@ -59,7 +59,7 @@ class Client:
     async def send(self) -> None:
         while True:
             user_input = await ainput('')
-            if not user_input:  # i.e. enter key pressed
+            if not user_input:  # просто нажали Enter
                 break
 
             message_obj = Message(username=self.username, text=user_input)

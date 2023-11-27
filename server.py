@@ -45,7 +45,7 @@ def message_str_to_message_obj(message: str) -> Message:
     """
     message_list = message.split(sep=';', maxsplit=2)
     created_at = datetime.strptime(message_list[0], '%Y-%m-%d %H:%M:%S.%f')
-    username = message_list[1]  # [:-1]
+    username = message_list[1]
     text = message_list[2]
     return Message(created_at=created_at, username=username, text=text)
 
@@ -125,14 +125,17 @@ class Server:
             message_bytes = message_obj_to_message_str(message_obj).encode()
             writer.write(message_bytes)
             await writer.drain()
-        # await asyncio.sleep(0.1)
 
     async def send_all_exсept_me(
             self, message: str, write_username: str) -> None:
         """
         Отправляет сообщения всем клиентам в чате кроме себя
         """
-        await asyncio.sleep(0.1)
+        for username, writer in self.clients.items():
+            if username != write_username:
+                writer.write(f'{message}\n'.encode())
+                await writer.drain()
+
         # for user, client_writer in self.clients.items():
         #     for chat_name, chat in self.chats.items():
         #         if (user in chat.clients and write_username in chat.clients
@@ -166,9 +169,6 @@ class Server:
 
                 message_str = message_bytes.decode().strip()
                 message_obj = message_str_to_message_obj(message_str)
-
-                if message_obj.text.startswith('/quit'):
-                    break
 
                 if message_obj.text.startswith('/stop'):
                     await self.stop()
@@ -214,7 +214,7 @@ class Server:
         self.server.close()
         await self.server.wait_closed()
         self.backup_chat_history(self.BACKUP_FILE)
-        logger.info('Сервер остановлен.')
+        logger.info('Сервер штатно остановлен.')
 
 
 async def main() -> None:
@@ -229,4 +229,4 @@ if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info('Сервер завершил свою работу.')
+        logger.info('Сервер нештатно завершил свою работу.')
