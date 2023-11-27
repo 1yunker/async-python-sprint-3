@@ -1,9 +1,9 @@
 import asyncio
+import json
 import logging
 import sys
 from asyncio.streams import StreamReader, StreamWriter
 from datetime import datetime
-from tkinter import S
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -27,7 +27,25 @@ class Message:
         self.datetime = created_at
 
     def __str__(self) -> str:
-        return f'{self.datetime};{self.author};{self.text}\n'
+        return f'{self.author}: {self.text}'
+
+
+def message_obj_to_message_str(message: Message) -> str:
+    """
+    Сериализует объект Message в строку
+    """
+    return f'{message.datetime};{message.author};{message.text}\n'
+
+
+def message_str_to_message_obj(message: str) -> Message:
+    """
+    Десериализует строку message в объект Message
+    """
+    message_list = message.split(sep=';', maxsplit=2)
+    created_at = datetime.strptime(message_list[0], '%Y-%m-%d %H:%M:%S.%f')
+    username = message_list[1]  # [:-1]
+    text = message_list[2]
+    return Message(created_at=created_at, username=username, text=text)
 
 
 class Chat:
@@ -40,7 +58,7 @@ class Chat:
 
 
 class Server:
-
+    # Имя файла для сохранения истории общего чата
     BACKUP_FILE = 'Chat_messages.json'
 
     def __init__(self, host=HOST, port=PORT):
@@ -52,25 +70,55 @@ class Server:
         self.public_chat = Chat(PUBLIC_CHAT_NAME, clients=set(), messages=[])
         self.chats = {'Public': self.public_chat}
 
-        # self.restore_server_history()
+        # self.restore_chat_history()
 
-    @staticmethod
-    def message_str_to_message_obj(message: str):
-        message_list = message.split(sep=';', maxsplit=2)
-        created_at = datetime.strptime(message_list[0], '%Y-%m-%d %H:%M:%S.%f')
-        username = message_list[1]  # [:-1]
-        text = message_list[2]
-        return Message(created_at=created_at, username=username, text=text)
+    def backup_chat_history(self, backup_file: str) -> None:
+        """
+        Сохраняет историю общего чата в JSON-файл (BACKUP_FILE)
+        """
+        messages_json = []
+        for message in self.messages_store:
+            message_dict = dict(message.__dict__)
+            message_dict['datetime'] = str(message.datetime)
+            messages_json.append(message_dict)
+
+        with open(backup_file, 'w') as f:
+            json.dump(messages_json, f, indent=4)
+        logger.info(
+            f'История общего чата успешно сохранена в {backup_file}.'
+        )
+
+    def restore_chat_history(self, backup_file: str) -> None:
+        """
+        Восстанавливает историю общего чата из JSON-файла (BACKUP_FILE)
+        """
+        with open(backup_file, 'r') as f:
+            messages = json.load(f)
+
+        for message in messages:
+            message_obj = Message(
+                username=message.get('author'),
+                text=message.get('text'),
+                created_at=datetime.strptime(
+                    message.get('start_at'), '%Y-%m-%d %H:%M:%S.%f'
+                ),
+            )
+            self.messages_store.append(message_obj)
+        logger.info(
+            f'История общего чата успешно восстановлена из {backup_file}.'
+        )
 
     async def send_last_messages(self, writer: StreamWriter) -> None:
         """
         Посылает клиенту последние LAST_MESSAGES_CNT сообщений
         """
-        for message in self.messages_store[-LAST_MESSAGES_CNT:]:
+        for message_obj in self.messages_store[-LAST_MESSAGES_CNT:]:
+            message = str(message_obj)
             writer.write(f'{message}\n'.encode())
             await writer.drain()
 
-    async def send_everyone_exept_me(self, message: str, write_username: str) -> None:
+    async def send_all_exept_me(
+            self, message: str, write_username: str) -> None:
         """
         Отправляет сообщения всем клиентам в чате кроме себя
         """
@@ -85,13 +133,9 @@ class Server:
             self, reader: StreamReader, writer: StreamWriter):
 
         # Принятый байткод переводим в строку и десереализуем в объект Message
-        message_bytes = await reader.readline()
+        message_bytes: bytes = await reader.readline()
         message_str = message_bytes.decode().strip()
-        message_obj = self.message_str_to_message_obj(message_str)
-
-        # username_bytes: bytes = await reader.readline()
-        # username: str = username_bytes.decode().strip()
-        # self.public_chat.clients.add(username)
+        message_obj = message_str_to_message_obj(message_str)
 
         if message_obj.author in self.clients.keys():
             self.clients[message_obj.author] = writer
@@ -101,16 +145,18 @@ class Server:
             new_client_message = f'{message_obj.author} вошел в чат'
             print(new_client_message)
             self.messages_store.append(message_obj)
-            await self.send_everyone_exept_me(
+            await self.send_all_exept_me(
                 new_client_message, message_obj.author)
 
         try:
             while True:
-                message_bytes: bytes = await reader.readline()
+                message_bytes = await reader.readline()
                 if not message_bytes:
                     break
 
-                if message_bytes.decode().startswith('/quit'):
+                message_str = message_bytes.decode().strip()
+                message_obj = message_str_to_message_obj(message_str)
+                if message_obj.text.startswith('/quit'):
                     break
 
                 # if message_bytes.decode().startswith('/chats'):
@@ -128,12 +174,12 @@ class Server:
                 #     await self.send_to_one_client(message_bytes, username)
                 #     continue
 
-                message_str = message_bytes.decode().strip()
-                message_obj = self.message_str_to_message_obj(message_str)
                 self.messages_store.append(message_obj)
-                print(message_str)
-                await self.send_everyone_exept_me(
+                print(message_obj)
+
+                await self.send_all_exept_me(
                     message_str, message_obj.author)
+
         except asyncio.IncompleteReadError as error:
             logger.error(f'Server catch IncompleteReadError: {error}')
         finally:
