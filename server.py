@@ -168,11 +168,13 @@ class Server:
         Посылает повторно подключенному клиенту непрочитанные
         сообщения из общего чата.
         """
-        for message_obj in self.message_store:
+        for message_obj in reversed(self.message_store):
             if message_obj.datetime > exit_datetime:
                 message_bytes = message_object_to_str(message_obj).encode()
                 writer.write(message_bytes)
                 await writer.drain()
+            else:
+                break
 
     async def send_all_except_me(
             self, message: str, write_username: str) -> None:
@@ -263,7 +265,6 @@ class Server:
             logger.error(f'Во время работы возникла ошибка: {error}')
         finally:
             # Сохраняем дату выхода пользователя из чата
-            # self.clients[message_obj.author] = None
             self.clients[message_obj.author] = datetime.now()
             # Информируем клиентов о выходе пользователя из чата
             message_str = f'== {message_obj.author} вышел из чата =='

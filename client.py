@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import logging
 
 from aioconsole import ainput
@@ -71,7 +72,8 @@ class Client:
             if not user_input:  # просто нажали Enter
                 break
 
-            message_obj = Message(username=self.username, text=user_input)
+            message_obj = Message(username=self.username, text=user_input,
+                                  created_at=datetime.datetime.now())
             message_bytes = message_object_to_str(message_obj).encode()
             self.writer.write(message_bytes)
             await self.writer.drain()
