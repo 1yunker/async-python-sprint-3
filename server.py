@@ -186,6 +186,18 @@ class Server:
                 writer.write(message_bytes)
                 await writer.drain()
 
+    async def send_private_message(
+            self, message: str, target_username: str) -> None:
+        """
+        Отправляет личное сообщение указанному пользователю.
+        """
+        writer = self.clients[target_username]
+        message = ' '.join(['[private]', message])
+        message_obj = Message(target_username, message)
+        message_bytes = message_object_to_str(message_obj).encode()
+        writer.write(message_bytes)
+        await writer.drain()
+
     async def client_connected(
             self, reader: StreamReader, writer: StreamWriter):
 
@@ -232,16 +244,20 @@ class Server:
                 #     await self.create_chat(message_bytes, username, writer)
                 #     continue
 
-                # if message_bytes.decode().startswith('/send'):
-                #     """Метод отправки сообщения определенному клиенту"""
-                #     await self.send_to_one_client(message_bytes, username)
-                #     continue
+                if message_obj.text.startswith('/send'):
+                    """
+                    Отрпавить личное сообщение пользователю.
+                    """
+                    [_, username, text] = message_obj.text.split(maxsplit=2)
+                    await self.send_private_message(text, username)
+                    continue
 
-                self.message_store.append(message_obj)
-                print(message_obj)
+                else:
+                    self.message_store.append(message_obj)
+                    print(message_obj)
 
-                await self.send_all_except_me(
-                    message_obj.text, message_obj.author)
+                    await self.send_all_except_me(
+                        message_obj.text, message_obj.author)
 
         except BaseException as error:
             logger.error(f'Во время работы возникла ошибка: {error}')
