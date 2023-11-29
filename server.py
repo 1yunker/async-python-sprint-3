@@ -27,13 +27,13 @@ TTL_MESSAGES_SEC = timedelta(seconds=3600)
 
 
 class Message:
-    def __init__(
-            self, username: str, text='', created_at=datetime.now(), sep=': '
-    ):
+    def __init__(self, username: str, text='', created_at=datetime.now(),
+                 sep=':', to=''):
         self.author = username
         self.text = text
         self.datetime = created_at
         self.sep = sep
+        self.to_username = to
 
     def __str__(self) -> str:
         return f'{self.author}{self.sep} {self.text}'
@@ -44,30 +44,21 @@ def message_object_to_str(message: Message) -> str:
     Сериализует объект Message в строку
     """
     return (f'{message.datetime};{message.author};'
-            f'{message.text};{message.sep}\n')
+            f'{message.text};{message.sep};{message.to_username}\n')
 
 
 def message_str_to_object(message: str) -> Message:
     """
     Десериализует строку message в объект Message
     """
-    message_list = message.split(sep=';', maxsplit=3)
+    message_list = message.split(sep=';', maxsplit=4)
     username = message_list[1]
     text = message_list[2]
     created_at = datetime.strptime(message_list[0], '%Y-%m-%d %H:%M:%S.%f')
     sep = message_list[3]
-    return Message(
-        username=username, text=text, created_at=created_at, sep=sep
-    )
-
-
-class Chat:
-    def __init__(self, name: str, clients: set[str],
-                 messages: list[Message], last_msg_cnt=LAST_MESSAGES_CNT):
-        self.name = name
-        self.clients = clients if clients else set()
-        self.messages = messages or []
-        self.last_msg_cnt = last_msg_cnt
+    to_username = message_list[4]
+    return Message(username=username, text=text, created_at=created_at,
+                   sep=sep, to=to_username)
 
 
 class Server:
@@ -79,9 +70,7 @@ class Server:
         self.server = None
         self.host = host
         self.port = port
-        self.message_store = []
-        self.public_chat = Chat(PUBLIC_CHAT_NAME, clients=set(), messages=[])
-        self.chats = {'Public': self.public_chat}
+        self.message_store = []  # list[Message]
 
         self.restore_chat_history(self.BACKUP_FILE)
 
@@ -117,6 +106,7 @@ class Server:
                         message.get('datetime'), '%Y-%m-%d %H:%M:%S.%f'
                     ),
                     sep=message.get('sep'),
+                    to=message.get('to_username'),
                 )
 
                 if datetime.now() - message_obj.datetime < TTL_MESSAGES_SEC:
@@ -142,7 +132,7 @@ class Server:
         messages.append(Message(
             '', '--------------------------------------------------', sep=''))
         messages.append(Message(
-            '', '/send username text - отправка личного сообщения', sep=''))
+            '', '/private username text - отправка личного сообщения', sep=''))
         messages.append(Message(
             '', '==================================================', sep=''))
 
@@ -162,17 +152,18 @@ class Server:
             await writer.drain()
 
     async def send_unread_messages(
-            self, writer: StreamWriter,  # username: str,
+            self, writer: StreamWriter, username: str,
             exit_datetime: datetime) -> None:
         """
         Посылает повторно подключенному клиенту непрочитанные
-        сообщения из общего чата.
+        личные сообщения и сообщения из общего чата.
         """
         for message_obj in reversed(self.message_store):
             if message_obj.datetime > exit_datetime:
-                message_bytes = message_object_to_str(message_obj).encode()
-                writer.write(message_bytes)
-                await writer.drain()
+                if message_obj.to_username in ('', username):
+                    message_bytes = message_object_to_str(message_obj).encode()
+                    writer.write(message_bytes)
+                    await writer.drain()
             else:
                 break
 
@@ -222,7 +213,8 @@ class Server:
         else:
             exit_datetime = self.clients[message_obj.author]
             self.clients[message_obj.author] = writer
-            await self.send_unread_messages(writer, exit_datetime)
+            await self.send_unread_messages(
+                writer, message_obj.author, exit_datetime)
 
         try:
             while True:
@@ -236,21 +228,16 @@ class Server:
                 if message_obj.text.startswith('/stop'):
                     await self.stop()
 
-                # if message_bytes.decode().startswith('/chats'):
-                #     """Метод получения списка чатов"""
-                #     await self.get_chats(message_bytes, writer)
-                #     continue
-
-                # if message_bytes.decode().startswith('/get_chat'):
-                #     """Метод создания чата или переход в существующий"""
-                #     await self.create_chat(message_bytes, username, writer)
-                #     continue
-
-                if message_obj.text.startswith('/send'):
+                if message_obj.text.startswith('/private'):
                     """
                     Отрпавить личное сообщение пользователю.
                     """
+                    # Парсим текст сообщения и записываем данные в instance
                     [_, username, text] = message_obj.text.split(maxsplit=2)
+                    message_obj.to_username = username
+                    message_obj.text = text
+                    self.message_store.append(message_obj)
+
                     await self.send_private_message(text, username)
                     continue
 
