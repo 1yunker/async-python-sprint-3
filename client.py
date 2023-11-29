@@ -1,12 +1,14 @@
 import asyncio
+from codecs import StreamReader, StreamWriter
+from http import client
 import logging
 from aioconsole import ainput
 from server import (
     HOST,
     PORT,
     Message,
-    message_obj_to_message_str,
-    message_str_to_message_obj,
+    message_object_to_str,
+    message_str_to_object,
 )
 
 logger = logging.getLogger()
@@ -35,13 +37,14 @@ class Client:
 
             # Отправляем стартовое сообщение с именем пользователя
             message_obj = Message(username=self.username)
-            message_bytes = message_obj_to_message_str(message_obj).encode()
+            message_bytes = message_object_to_str(message_obj).encode()
             self.writer.write(message_bytes)
             await self.writer.drain()
             await asyncio.gather(self.listen(), self.send())
 
         except Exception as error:
             logger.error(f'Произошла ошибка: {error}')
+            self.writer.close()
 
     async def listen(self) -> None:
         try:
@@ -50,8 +53,8 @@ class Client:
                 if not message_bytes:
                     break
                 message_str = message_bytes.decode().strip()
-                message_obj = message_str_to_message_obj(message_str)
-                print(message_obj)
+                message_obj = message_str_to_object(message_str)
+                print(str(message_obj))
 
         except OSError as error:
             logger.error(f'Произошла ошибка: {error}')
@@ -63,7 +66,7 @@ class Client:
                 break
 
             message_obj = Message(username=self.username, text=user_input)
-            message_bytes = message_obj_to_message_str(message_obj).encode()
+            message_bytes = message_object_to_str(message_obj).encode()
             self.writer.write(message_bytes)
             await self.writer.drain()
 
