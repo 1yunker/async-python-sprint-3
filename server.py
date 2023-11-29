@@ -5,9 +5,13 @@ import sys
 from asyncio.streams import StreamReader, StreamWriter
 from datetime import datetime, timedelta
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-logger.addHandler(logging.StreamHandler(stream=sys.stdout))
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s]: %(message)s',
+    stream=sys.stdout,
+)
+
+logger = logging.getLogger(__name__)
 
 HOST = '127.0.0.1'
 PORT = 8000
@@ -39,18 +43,22 @@ def message_object_to_str(message: Message) -> str:
     """
     Сериализует объект Message в строку
     """
-    return f'{message.datetime};{message.author};{message.text}\n'
+    return (f'{message.datetime};{message.author};'
+            f'{message.text};{message.sep}\n')
 
 
 def message_str_to_object(message: str) -> Message:
     """
     Десериализует строку message в объект Message
     """
-    message_list = message.split(sep=';', maxsplit=2)
-    created_at = datetime.strptime(message_list[0], '%Y-%m-%d %H:%M:%S.%f')
+    message_list = message.split(sep=';', maxsplit=3)
     username = message_list[1]
     text = message_list[2]
-    return Message(created_at=created_at, username=username, text=text)
+    created_at = datetime.strptime(message_list[0], '%Y-%m-%d %H:%M:%S.%f')
+    sep = message_list[3]
+    return Message(
+        username=username, text=text, created_at=created_at, sep=sep
+    )
 
 
 class Chat:
@@ -127,7 +135,7 @@ class Server:
         """
         messages = []
         messages.append(Message(
-            '[', f'{username}, добро пожаловать в общий чат! ]', sep=' '))
+            '', f'{username}, добро пожаловать в общий чат!', sep=' '))
         messages.append(Message(
             '', '==================================================', sep=' '))
         messages.append(Message(
