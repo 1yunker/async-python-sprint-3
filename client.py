@@ -26,7 +26,7 @@ class Client:
         """
         Подключаемся к серверу и посылаем стартовое сообщение.
         """
-        logger.info(f'Запускаем клиента под именем {self.username}')
+        # logger.info(f'Запускаем клиента под именем {self.username}')
         try:
             self.reader, self.writer = await asyncio.open_connection(
                 self.server_host, self.server_port
@@ -71,9 +71,7 @@ class Client:
             if not user_input:  # просто нажали Enter
                 break
 
-            message_obj = Message(
-                username=self.username, text=user_input, sep=':'
-            )
+            message_obj = Message(username=self.username, text=user_input)
             message_bytes = message_object_to_str(message_obj).encode()
             self.writer.write(message_bytes)
             await self.writer.drain()

@@ -28,7 +28,7 @@ TTL_MESSAGES_SEC = timedelta(seconds=3600)
 
 class Message:
     def __init__(
-            self, username: str, text='', created_at=datetime.now(), sep=':'
+            self, username: str, text='', created_at=datetime.now(), sep=': '
     ):
         self.author = username
         self.text = text
@@ -116,6 +116,7 @@ class Server:
                     created_at=datetime.strptime(
                         message.get('datetime'), '%Y-%m-%d %H:%M:%S.%f'
                     ),
+                    sep=message.get('sep'),
                 )
 
                 if datetime.now() - message_obj.datetime < TTL_MESSAGES_SEC:
@@ -135,13 +136,15 @@ class Server:
         """
         messages = []
         messages.append(Message(
-            '', f'{username}, добро пожаловать в общий чат!', sep=' '))
+            '', '==================================================', sep=''))
         messages.append(Message(
-            '', '==================================================', sep=' '))
+            '', f'{username}, добро пожаловать в общий чат!', sep=''))
         messages.append(Message(
-            '', '/send username text - отправка личного сообщения', sep=' '))
+            '', '--------------------------------------------------', sep=''))
         messages.append(Message(
-            '', '==================================================', sep=' '))
+            '', '/send username text - отправка личного сообщения', sep=''))
+        messages.append(Message(
+            '', '==================================================', sep=''))
 
         for message_obj in messages:
             message_bytes = message_object_to_str(message_obj).encode()
@@ -277,7 +280,7 @@ async def main() -> None:
         server = Server()
         await server.listen()
     except asyncio.CancelledError:
-        print('Сервер остановлен по требованию клиента.')
+        logger.info('Сервер остановлен по требованию клиента.')
 
 
 if __name__ == '__main__':
