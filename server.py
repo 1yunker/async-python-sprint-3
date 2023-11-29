@@ -16,12 +16,10 @@ logger = logging.getLogger(__name__)
 HOST = '127.0.0.1'
 PORT = 8000
 
-# Название общего чата
-PUBLIC_CHAT_NAME = 'Public'
 # Кол-во последних выводимых сообщений (при подключении в общий чат)
 LAST_MESSAGES_CNT = 20
 # Лимит отправляемых одним пользоватеелм сообщений в час (в общий чат)
-LIMIT_MESSAGES_CNT = 20
+LIMIT_MESSAGES_CNT = 5
 # Время жизни сообщения в секундах
 TTL_MESSAGES_SEC = timedelta(seconds=3600)
 
@@ -194,6 +192,9 @@ class Server:
     async def client_connected(
             self, reader: StreamReader, writer: StreamWriter):
 
+        msg_counter = LIMIT_MESSAGES_CNT
+        connected_at = datetime.now()
+
         # Принимаем от клиента стартовое сообщение с именем пользователя
         intro_bytes = await reader.readline()
         # Принятый байткод переводим в строку и десереализуем в объект Message
@@ -242,11 +243,27 @@ class Server:
                     continue
 
                 else:
-                    self.message_store.append(message_obj)
-                    print(message_obj)
+                    # Обновляем лимит сообщений раз в час
+                    if (datetime.now() - connected_at).seconds > 3600:
+                        connected_at = datetime.now()
+                        msg_counter = LIMIT_MESSAGES_CNT
 
-                    await self.send_all_except_me(
-                        message_obj.text, message_obj.author)
+                    msg_counter -= 1
+                    if msg_counter < 0:
+                        # Посылаем пользователю информацию о лимите сообщений
+                        #  в общем чате
+                        message_obj = Message(
+                            '!', 'Вы исчерпали лимит сообщений в общем чате !',
+                            sep='')
+                        message_bytes = message_object_to_str(
+                            message_obj).encode()
+                        writer.write(message_bytes)
+                    else:
+                        self.message_store.append(message_obj)
+                        print(message_obj)
+
+                        await self.send_all_except_me(
+                            message_obj.text, message_obj.author)
 
         except BaseException as error:
             logger.error(f'Во время работы возникла ошибка: {error}')
