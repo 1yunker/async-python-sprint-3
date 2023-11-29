@@ -23,13 +23,16 @@ TTL_MESSAGES_SEC = timedelta(seconds=3600)
 
 
 class Message:
-    def __init__(self, username: str, text='', created_at=datetime.now()):
+    def __init__(
+            self, username: str, text='', created_at=datetime.now(), sep=':'
+    ):
         self.author = username
         self.text = text
         self.datetime = created_at
+        self.sep = sep
 
     def __str__(self) -> str:
-        return f'{self.author}: {self.text}'
+        return f'{self.author}{self.sep} {self.text}'
 
 
 def message_object_to_str(message: Message) -> str:
@@ -117,21 +120,25 @@ class Server:
                 f'При чтении файла {backup_file} произошла ошибка: {err}.'
             )
 
-    async def send_start_message(
+    async def send_start_messages(
             self, username: str, writer: StreamWriter) -> None:
         """
         Посылает новому клиенту стартовое сообщение.
         """
-        message_str = (
-            f'Уважаемый {username}! Добро пожаловать в общий чат!'
-            '======================================================='
-            '/send {username} {message} - отправка личного сообщения'
-            '======================================================='
-        )
+        messages = []
+        messages.append(Message(
+            '[', f'{username}, добро пожаловать в общий чат! ]', sep=' '))
+        messages.append(Message(
+            '', '==================================================', sep=' '))
+        messages.append(Message(
+            '', '/send username text - отправка личного сообщения', sep=' '))
+        messages.append(Message(
+            '', '==================================================', sep=' '))
 
-        message_bytes = message_str.encode()
-        writer.write(message_bytes)
-        await writer.drain()
+        for message_obj in messages:
+            message_bytes = message_object_to_str(message_obj).encode()
+            writer.write(message_bytes)
+            await writer.drain()
 
     async def send_last_messages(self, writer: StreamWriter) -> None:
         """
@@ -144,7 +151,8 @@ class Server:
             await writer.drain()
 
     async def send_unread_messages(
-            self, writer: StreamWriter, exit_datetime: datetime) -> None:
+            self, writer: StreamWriter,  # username: str,
+            exit_datetime: datetime) -> None:
         """
         Посылает повторно подключенному клиенту непрочитанные
         сообщения из общего чата.
@@ -158,43 +166,38 @@ class Server:
     async def send_all_except_me(
             self, message: str, write_username: str) -> None:
         """
-        Отправляет сообщения всем клиентам в чате кроме себя.
+        Отправляет сообщение всем клиентам в общем чате кроме себя.
         """
         for username, writer in self.clients.items():
-            if username != write_username:
+            if username != write_username and isinstance(writer, StreamWriter):
                 message_obj = Message(write_username, message)
                 message_bytes = message_object_to_str(message_obj).encode()
                 writer.write(message_bytes)
                 await writer.drain()
 
-        # for user, client_writer in self.clients.items():
-        #     for chat_name, chat in self.chats.items():
-        #         if (user in chat.clients and write_username in chat.clients
-        #             and user != write_username):
-        #             client_writer.write(f'{message}\n'.encode())
-        #             await client_writer.drain()
-
     async def client_connected(
             self, reader: StreamReader, writer: StreamWriter):
 
-        # Принятый байткод переводим в строку и десереализуем в объект Message
+        # Принимаем от клиента стартовое сообщение с именем пользователя
         intro_bytes = await reader.readline()
+        # Принятый байткод переводим в строку и десереализуем в объект Message
         message_str = intro_bytes.decode().strip()
         message_obj = message_str_to_object(message_str)
 
+        # Смотрим не подключался ли пользователь ранее
         if message_obj.author not in self.clients.keys():
             self.clients[message_obj.author] = writer
-            # await self.send_start_message(message_obj.author, writer)
+            await self.send_start_messages(message_obj.author, writer)
             await self.send_last_messages(writer)
 
-            new_client_message = f'=={message_obj.author} вошел в чат=='
+            new_client_message = f'== {message_obj.author} вошел в чат =='
             print(new_client_message)
             await self.send_all_except_me(
                 new_client_message, message_obj.author)
-        # else:
-        #     exit_datetime = self.clients[message_obj.author]
-        #     await self.send_unread_messages(writer, exit_datetime)
-            # self.public_chat.clients.add(message_obj.author)
+        else:
+            exit_datetime = self.clients[message_obj.author]
+            self.clients[message_obj.author] = writer
+            await self.send_unread_messages(writer, exit_datetime)
 
         try:
             while True:
@@ -236,7 +239,7 @@ class Server:
             # self.clients[message_obj.author] = None
             self.clients[message_obj.author] = datetime.now()
             # Информируем клиентов о выходе пользователя из чата
-            message_str = f'=={message_obj.author} вышел из чата=='
+            message_str = f'== {message_obj.author} вышел из чата =='
             await self.send_all_except_me(message_str, message_obj.author)
 
             logger.info(message_str)
