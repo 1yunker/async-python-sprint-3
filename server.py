@@ -17,7 +17,7 @@ HOST = '127.0.0.1'
 PORT = 8000
 
 # Кол-во последних выводимых сообщений (при подключении в общий чат)
-LAST_MESSAGES_CNT = 20
+LAST_MESSAGES_CNT = 3
 # Лимит отправляемых одним пользоватеелм сообщений в час (в общий чат)
 LIMIT_MESSAGES_CNT = 5
 # Время жизни сообщения в секундах
@@ -26,12 +26,13 @@ TTL_MESSAGES_SEC = timedelta(seconds=3600)
 
 class Message:
     def __init__(self, username: str, text='', created_at=datetime.now(),
-                 sep=':', to=''):
+                 sep=':', to='', send_after=0):
         self.author = username
         self.text = text
         self.datetime = created_at
         self.sep = sep
         self.to_username = to
+        self.send_after = send_after
 
     def __str__(self) -> str:
         return f'{self.author}{self.sep} {self.text}'
@@ -69,6 +70,7 @@ class Server:
         self.host = host
         self.port = port
         self.message_store = []  # list[Message]
+        self.message_to_send = []  # list[Message]
 
         self.restore_chat_history(self.BACKUP_FILE)
 
@@ -124,15 +126,21 @@ class Server:
         """
         messages = []
         messages.append(Message(
-            '', '==================================================', sep=''))
+            'ǁ', '==================================================', sep=''))
         messages.append(Message(
-            '', f'{username}, добро пожаловать в общий чат!', sep=''))
+            'ǁ     ', f'{username}, добро пожаловать в общий чат!', sep=''))
         messages.append(Message(
-            '', '--------------------------------------------------', sep=''))
+            'ǁ', '--------------------------------------------------', sep=''))
         messages.append(Message(
-            '', '/private username text - отправка личного сообщения', sep=''))
+            'ǁ', '/private username text :отправка личного сообщения', sep=''))
         messages.append(Message(
-            '', '==================================================', sep=''))
+            'ǁ', '/delay seconds text :отложенная отправка сообщения', sep=''))
+        messages.append(Message(
+            'ǁ', '/clear_unsent :стереть все неотправленые сообщения', sep=''))
+        messages.append(Message(
+            'ǁ', '/stop :остановить сервер и сделать бэкап сообщений', sep=''))
+        messages.append(Message(
+            'ǁ', '==================================================', sep=''))
 
         for message_obj in messages:
             message_bytes = message_object_to_str(message_obj).encode()
@@ -144,10 +152,15 @@ class Server:
         Посылает новому клиенту последние LAST_MESSAGES_CNT
         сообщений из общего чата.
         """
-        for message_obj in self.message_store[-LAST_MESSAGES_CNT:]:
-            message_bytes = message_object_to_str(message_obj).encode()
-            writer.write(message_bytes)
-            await writer.drain()
+        msg_counter = LAST_MESSAGES_CNT
+        for message_obj in reversed(self.message_store):
+            if message_obj.to_username == '':
+                msg_counter -= 1
+                if msg_counter < 0:
+                    break
+                message_bytes = message_object_to_str(message_obj).encode()
+                writer.write(message_bytes)
+                await writer.drain()
 
     async def send_unread_messages(
             self, writer: StreamWriter, username: str,
@@ -192,6 +205,7 @@ class Server:
     async def client_connected(
             self, reader: StreamReader, writer: StreamWriter):
 
+        # Фиксируем счетчик лимита сообщений и время соединения
         msg_counter = LIMIT_MESSAGES_CNT
         connected_at = datetime.now()
 
@@ -229,19 +243,33 @@ class Server:
                 if message_obj.text.startswith('/stop'):
                     await self.stop()
 
-                if message_obj.text.startswith('/private'):
+                if message_obj.text.startswith('/delay'):
                     """
-                    Отрпавить личное сообщение пользователю.
+                    Отправить сообщение c заданной в секундах задержкой.
                     """
-                    # Парсим текст сообщения и записываем данные в instance
+                    # Парсим текст сообщения и записываем данные в Message
+                    [_, delay, text] = message_obj.text.split(maxsplit=2)
+                    message_obj.send_after = delay
+                    message_obj.text = text
+                    self.message_to_send.append(message_obj)
+
+                elif message_obj.text.startswith('/clear_unsent'):
+                    """
+                    Стереть из списка все неотправленные сообщения.
+                    """
+                    self.message_to_send.clear()
+
+                elif message_obj.text.startswith('/private'):
+                    """
+                    Отрпавить личное сообщение указанному пользователю.
+                    """
+                    # Парсим текст сообщения и записываем данные в Message
                     [_, username, text] = message_obj.text.split(maxsplit=2)
                     message_obj.to_username = username
                     message_obj.text = text
                     self.message_store.append(message_obj)
 
                     await self.send_private_message(text, username)
-                    continue
-
                 else:
                     # Обновляем лимит сообщений раз в час
                     if (datetime.now() - connected_at).seconds > 3600:
@@ -265,7 +293,7 @@ class Server:
                         await self.send_all_except_me(
                             message_obj.text, message_obj.author)
 
-        except BaseException as error:
+        except asyncio.CancelledError as error:
             logger.error(f'Во время работы возникла ошибка: {error}')
         finally:
             # Сохраняем дату выхода пользователя из чата
@@ -286,6 +314,27 @@ class Server:
         async with self.server:
             await self.server.serve_forever()
 
+    async def send_with_delay(self):
+        """
+        Отправляет сообщения из списка на отправку при наступлении времени.
+        """
+        while True:
+            for message_obj in self.message_to_send:
+                if (
+                    message_obj.datetime
+                    + timedelta(seconds=int(message_obj.send_after))
+                    < datetime.now()
+                ):
+
+                    # Переносим сообщение из списка на отправку
+                    # в список отправленных и отправляем в общий чат
+                    self.message_to_send.remove(message_obj)
+                    self.message_store.append(message_obj)
+                    print(message_obj)
+                    await self.send_all_except_me(
+                        message_obj.text, message_obj.author)
+            await asyncio.sleep(1)
+
     async def stop(self):
         """
         Штатно останавливает сервер и сохраняет историю сообщений.
@@ -299,7 +348,7 @@ class Server:
 async def main() -> None:
     try:
         server = Server()
-        await server.listen()
+        await asyncio.gather(server.listen(), server.send_with_delay())
     except asyncio.CancelledError:
         logger.info('Сервер остановлен по требованию клиента.')
 
