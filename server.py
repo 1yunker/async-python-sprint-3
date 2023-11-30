@@ -273,13 +273,13 @@ class Server:
                 else:
                     # Обновляем лимит сообщений раз в час
                     if (datetime.now() - connected_at).seconds > 3600:
-                        connected_at = datetime.now()
                         msg_counter = LIMIT_MESSAGES_CNT
+                        connected_at = datetime.now()
 
                     msg_counter -= 1
                     if msg_counter < 0:
-                        # Посылаем пользователю информацию о лимите сообщений
-                        #  в общем чате
+                        # Посылаем пользователю информацию о превышении
+                        # лимита сообщений в общем чате
                         message_obj = Message(
                             '!', 'Вы исчерпали лимит сообщений в общем чате !',
                             sep='')
