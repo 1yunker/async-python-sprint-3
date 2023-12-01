@@ -2,26 +2,28 @@ import asyncio
 import datetime
 import logging
 
-from aioconsole import ainput
+from aioconsole import ainput  # type: ignore
 
-from server import (
-    HOST,
-    PORT,
-    Message,
-    message_object_to_str,
-    message_str_to_object,
-)
+from server import Message, message_object_to_str, message_str_to_object
+from settings import Settings
+
+settings = Settings()
 
 logger = logging.getLogger()
 
 
 class Client:
-    def __init__(self, username, server_host=HOST, server_port=PORT):
-        self.server_host: str = server_host
-        self.server_port: int = server_port
-        self.reader: asyncio.StreamReader = None
-        self.writer: asyncio.StreamWriter = None
-        self.username: str = username
+    def __init__(
+            self,
+            username: str,
+            server_host: str = settings.SERVER.HOST,
+            server_port: int = settings.SERVER.PORT
+    ):
+        self.server_host = server_host
+        self.server_port = server_port
+        self.reader = None
+        self.writer = None
+        self.username = username
 
     async def start(self) -> None:
         """

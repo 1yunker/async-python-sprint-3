@@ -5,6 +5,10 @@ import sys
 from asyncio.streams import StreamReader, StreamWriter
 from datetime import datetime, timedelta
 
+from settings import Settings
+
+settings = Settings()
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s]: %(message)s',
@@ -13,20 +17,17 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-HOST = '127.0.0.1'
-PORT = 8000
-
-# Кол-во последних выводимых сообщений (при подключении в общий чат)
-LAST_MESSAGES_CNT = 3
-# Лимит отправляемых одним пользоватеелм сообщений в час (в общий чат)
-LIMIT_MESSAGES_CNT = 5
-# Время жизни сообщения в секундах
-TTL_MESSAGES_SEC = timedelta(seconds=3600)
-
 
 class Message:
-    def __init__(self, username: str, text='', created_at=datetime.now(),
-                 sep=':', to='', send_after=0):
+    def __init__(
+            self,
+            username: str,
+            text: str = '',
+            created_at: datetime = datetime.now(),
+            sep: str = ':',
+            to: str = '',
+            send_after: int = 0
+    ):
         self.author = username
         self.text = text
         self.datetime = created_at
@@ -61,10 +62,14 @@ def message_str_to_object(message: str) -> Message:
 
 
 class Server:
-    # Имя файла для сохранения истории общего чата
-    BACKUP_FILE = 'messages.json'
+    # # Имя файла для сохранения истории общего чата
+    # BACKUP_FILE = 'messages.json'
 
-    def __init__(self, host=HOST, port=PORT):
+    def __init__(
+            self,
+            host: str = settings.SERVER.HOST,
+            port: int = settings.SERVER.PORT
+    ):
         self.clients: dict[str, StreamWriter | datetime] = {}
         self.server = None
         self.host: str = host
@@ -72,7 +77,7 @@ class Server:
         self.message_store: list[Message] = []
         self.message_to_send: list[Message] = []
 
-        self.restore_chat_history(self.BACKUP_FILE)
+        self.restore_chat_history(settings.SERVER.BACKUP_FILE)
 
     def backup_chat_history(self, backup_file: str) -> None:
         """
@@ -109,7 +114,10 @@ class Server:
                     to=message.get('to_username'),
                 )
 
-                if datetime.now() - message_obj.datetime < TTL_MESSAGES_SEC:
+                if (
+                    datetime.now() - message_obj.datetime
+                    < settings.TTL_MESSAGES_SEC
+                ):
                     self.message_store.append(message_obj)
             logger.info(
                 f'История общего чата успешно восстановлена из {backup_file}.'
@@ -152,7 +160,7 @@ class Server:
         Посылает новому клиенту последние LAST_MESSAGES_CNT
         сообщений из общего чата.
         """
-        msg_counter = LAST_MESSAGES_CNT
+        msg_counter = settings.LAST_MESSAGES_CNT
         for message_obj in reversed(self.message_store):
             if message_obj.to_username == '':
                 msg_counter -= 1
@@ -179,34 +187,48 @@ class Server:
                 break
 
     async def send_all_except_me(
-            self, message: str, write_username: str) -> None:
+            self, message: str, author_username: str) -> None:
         """
         Отправляет сообщение всем клиентам в общем чате кроме себя.
         """
         for username, writer in self.clients.items():
-            if username != write_username and isinstance(writer, StreamWriter):
-                message_obj = Message(write_username, message)
+            if (
+                username != author_username
+                and isinstance(writer, StreamWriter)
+            ):
+                message_obj = Message(author_username, message)
                 message_bytes = message_object_to_str(message_obj).encode()
                 writer.write(message_bytes)
                 await writer.drain()
 
     async def send_private_message(
-            self, message: str, target_username: str) -> None:
+            self, message: str, target_username: str, author_username: str
+    ) -> None:
         """
         Отправляет личное сообщение указанному пользователю.
         """
-        writer = self.clients[target_username]
-        message = ' '.join(['[private]', message])
-        message_obj = Message(target_username, message)
-        message_bytes = message_object_to_str(message_obj).encode()
-        writer.write(message_bytes)
-        await writer.drain()
+        # Проверяем присутствует ли указанный пользователь в чате
+        if target_username in self.clients.keys():
+            writer = self.clients[target_username]
+            message = ' '.join(['[private]', message])
+            message_obj = Message(author_username, message)
+        else:
+            writer = self.clients[author_username]
+            message = (f'Сообщение не отправлено. Пользователя с именем '
+                       f'{target_username} нет в чате!')
+            message_obj = Message('!', message, sep='')
+
+        # Убеждаемся что пользователь есть в чате
+        if isinstance(writer, StreamWriter):
+            message_bytes = message_object_to_str(message_obj).encode()
+            writer.write(message_bytes)
+            await writer.drain()
 
     async def client_connected(
             self, reader: StreamReader, writer: StreamWriter):
 
         # Фиксируем счетчик лимита сообщений и время соединения
-        msg_counter = LIMIT_MESSAGES_CNT
+        msg_counter = settings.LIMIT_MESSAGES_CNT
         connected_at = datetime.now()
 
         # Принимаем от клиента стартовое сообщение с именем пользователя
@@ -249,7 +271,7 @@ class Server:
                     """
                     # Парсим текст сообщения и записываем данные в Message
                     [_, delay, text] = message_obj.text.split(maxsplit=2)
-                    message_obj.send_after = delay
+                    message_obj.send_after = int(delay)
                     message_obj.text = text
                     self.message_to_send.append(message_obj)
 
@@ -261,7 +283,8 @@ class Server:
 
                 elif message_obj.text.startswith('/private'):
                     """
-                    Отрпавить личное сообщение указанному пользователю.
+                    Отрпавить личное сообщение указанному пользователю
+                    или вывести сообщение об ошибке.
                     """
                     # Парсим текст сообщения и записываем данные в Message
                     [_, username, text] = message_obj.text.split(maxsplit=2)
@@ -269,11 +292,12 @@ class Server:
                     message_obj.text = text
                     self.message_store.append(message_obj)
 
-                    await self.send_private_message(text, username)
+                    await self.send_private_message(
+                        text, username, message_obj.author)
                 else:
                     # Обновляем лимит сообщений раз в час
                     if (datetime.now() - connected_at).seconds > 3600:
-                        msg_counter = LIMIT_MESSAGES_CNT
+                        msg_counter = settings.LIMIT_MESSAGES_CNT
                         connected_at = datetime.now()
 
                     msg_counter -= 1
@@ -341,7 +365,7 @@ class Server:
         """
         self.server.close()
         await self.server.wait_closed()
-        self.backup_chat_history(self.BACKUP_FILE)
+        self.backup_chat_history(settings.SERVER.BACKUP_FILE)
         logger.info('Сервер штатно остановлен.')
 
 

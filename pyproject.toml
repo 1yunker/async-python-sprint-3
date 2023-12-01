@@ -7,3 +7,6 @@ extend-exclude = 'tests|migrations'
 profile = "black"
 line_length = 79
 extend_skip = ["tests", "migrations"]
+
+[mypy]
+ignore_missing_imports = true

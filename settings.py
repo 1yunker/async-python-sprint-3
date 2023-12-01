@@ -1,58 +1,22 @@
-from typing import Any, Callable, Set
+from datetime import timedelta
 
-from pydantic import (
-    AliasChoices,
-    AmqpDsn,
-    BaseModel,
-    Field,
-    ImportString,
-    PostgresDsn,
-    RedisDsn,
-)
-
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings
 
 
-class SubModel(BaseModel):
-    foo: str = 'bar'
-    apple: int = 1
+class ServerSettings(BaseModel):
+    HOST: str = Field(default='127.0.0.1')
+    PORT: int = Field(default=8000)
+    # Имя файла для сохранения истории общего чата
+    BACKUP_FILE: str = Field(default='messages.json')
 
 
 class Settings(BaseSettings):
-    auth_key: str = Field(validation_alias='my_auth_key')  
-
-    api_key: str = Field(alias='my_api_key')  
-
-    redis_dsn: RedisDsn = Field(
-        'redis://user:pass@localhost:6379/1',
-        validation_alias=AliasChoices('service_redis_dsn', 'redis_url'),  (3)
-    )
-    pg_dsn: PostgresDsn = 'postgres://user:pass@localhost:5432/foobar'
-    amqp_dsn: AmqpDsn = 'amqp://user:pass@localhost:5672/'
-
-    special_function: ImportString[Callable[[Any], Any]] = 'math.cos'  (4)
-
-    # to override domains:
-    # export my_prefix_domains='["foo.com", "bar.com"]'
-    domains: Set[str] = set()
-
-    # to override more_settings:
-    # export my_prefix_more_settings='{"foo": "x", "apple": 1}'
-    more_settings: SubModel = SubModel()
-
-    model_config = SettingsConfigDict(env_prefix='my_prefix_')  (5)
-
-
-print(Settings().model_dump())
-"""
-{
-    'auth_key': 'xxx',
-    'api_key': 'xxx',
-    'redis_dsn': Url('redis://user:pass@localhost:6379/1'),
-    'pg_dsn': MultiHostUrl('postgres://user:pass@localhost:5432/foobar'),
-    'amqp_dsn': Url('amqp://user:pass@localhost:5672/'),
-    'special_function': math.cos,
-    'domains': set(),
-    'more_settings': {'foo': 'bar', 'apple': 1},
-}
-"""
+    # Параметры сервера
+    SERVER: ServerSettings = ServerSettings()
+    # Кол-во последних выводимых сообщений (при подключении в общий чат)
+    LAST_MESSAGES_CNT: int = Field(default=3)
+    # Лимит отправляемых одним пользоватеелм сообщений в час (в общий чат)
+    LIMIT_MESSAGES_CNT: int = Field(default=5)
+    # Время жизни сообщения в секундах
+    TTL_MESSAGES_SEC: timedelta = Field(default=timedelta(seconds=3600))
