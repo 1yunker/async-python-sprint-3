@@ -17,17 +17,16 @@ logger = logging.getLogger()
 
 class Client:
     def __init__(self, username, server_host=HOST, server_port=PORT):
-        self.server_host = server_host
-        self.server_port = server_port
-        self.reader = None
-        self.writer = None
-        self.username = username
+        self.server_host: str = server_host
+        self.server_port: int = server_port
+        self.reader: asyncio.StreamReader = None
+        self.writer: asyncio.StreamWriter = None
+        self.username: str = username
 
     async def start(self) -> None:
         """
         Подключаемся к серверу и посылаем стартовое сообщение.
         """
-        # logger.info(f'Запускаем клиента под именем {self.username}')
         try:
             self.reader, self.writer = await asyncio.open_connection(
                 self.server_host, self.server_port

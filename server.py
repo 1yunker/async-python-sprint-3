@@ -65,12 +65,12 @@ class Server:
     BACKUP_FILE = 'messages.json'
 
     def __init__(self, host=HOST, port=PORT):
-        self.clients = {}  # dict[str, StreamWriter | datetime]
+        self.clients: dict[str, StreamWriter | datetime] = {}
         self.server = None
-        self.host = host
-        self.port = port
-        self.message_store = []  # list[Message]
-        self.message_to_send = []  # list[Message]
+        self.host: str = host
+        self.port: int = port
+        self.message_store: list[Message] = []
+        self.message_to_send: list[Message] = []
 
         self.restore_chat_history(self.BACKUP_FILE)
 
